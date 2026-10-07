@@ -1,0 +1,4 @@
+#!/bin/sh
+# Make the home screen pick up the new icon.
+uicache -p @APP@ 2>/dev/null || uicache 2>/dev/null || true
+exit 0

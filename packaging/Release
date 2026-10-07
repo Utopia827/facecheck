@@ -1,0 +1,8 @@
+Origin: Kobz
+Label: Kobz
+Suite: stable
+Version: 1.0
+Codename: kobz
+Architectures: iphoneos-arm iphoneos-arm64
+Components: main
+Description: Kobz demo apps

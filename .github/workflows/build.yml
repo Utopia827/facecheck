@@ -1,0 +1,62 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen ldid dpkg
+      - run: xcodegen generate
+      - name: Build unsigned for device
+        run: |
+          set -o pipefail
+          xcodebuild -project FaceCheck.xcodeproj -target FaceCheck -configuration Release \
+            -sdk iphoneos SYMROOT="$PWD/build" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | tail -40
+      - run: bash packaging/package.sh build/Release-iphoneos/FaceCheck.app ${{ github.run_number }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/repo
+
+  screenshots:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Build for simulator
+        run: |
+          set -o pipefail
+          xcodebuild -project FaceCheck.xcodeproj -target FaceCheck -configuration Debug \
+            -sdk iphonesimulator SYMROOT="$PWD/build" CODE_SIGNING_ALLOWED=NO \
+            build | tail -40
+      - run: bash packaging/screenshots.sh build/Debug-iphonesimulator/FaceCheck.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: shots
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

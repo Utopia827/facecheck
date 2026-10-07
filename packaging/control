@@ -1,0 +1,8 @@
+Package: @ID@
+Name: FaceCheck
+Version: @VERSION@
+Architecture: @ARCH@
+Description: Video selfie demo
+Maintainer: Kobz
+Author: Kobz
+Section: Applications
