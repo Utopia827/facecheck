@@ -96,7 +96,7 @@ final class FaceTracker: NSObject, ObservableObject {
                 c.automaticallyAdjustsVideoMirroring = false
                 c.isVideoMirrored = true
             }
-            if c.isVideoRotationAngleSupported(90) { c.videoRotationAngle = 90 }
+            if c.isVideoOrientationSupported { c.videoOrientation = .portrait }
             mirrored = c.isVideoMirrored
         }
         configured = true

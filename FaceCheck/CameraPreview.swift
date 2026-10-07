@@ -33,8 +33,8 @@ final class PreviewUIView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         // The connection only exists once the session has its camera, so check on every layout.
-        if let c = previewLayer.connection, c.isVideoRotationAngleSupported(90), c.videoRotationAngle != 90 {
-            c.videoRotationAngle = 90
+        if let c = previewLayer.connection, c.isVideoOrientationSupported, c.videoOrientation != .portrait {
+            c.videoOrientation = .portrait
         }
     }
 }

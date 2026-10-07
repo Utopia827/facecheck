@@ -117,7 +117,7 @@ final class FlowModel: ObservableObject {
         }
         phase = .checking
         Task {
-            try? await Task.sleep(for: .seconds(1.5))
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
             if phase == .checking { phase = .finished }
         }
     }

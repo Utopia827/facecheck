@@ -29,12 +29,12 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: screen)
-        .onChange(of: flow.phase) { _, phase in
+        .onChange(of: flow.phase) { phase in
             if phase == .finished { screen = .success }
         }
         .task(id: screen) {
             guard autoplay, screen == .success else { return }
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
             if screen == .success { restart() }
         }
     }

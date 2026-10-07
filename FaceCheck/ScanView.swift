@@ -31,7 +31,7 @@ struct ScanView: View {
         .onAppear { tracker.start() }
         .onDisappear { tracker.stop() }
         .onReceive(tracker.$pose) { flow.update($0) }
-        .onChange(of: flow.active) { _, d in tracker.simTarget = d }
+        .onChange(of: flow.active) { d in tracker.simTarget = d }
     }
 
     private var scanner: some View {
@@ -43,7 +43,6 @@ struct ScanView: View {
                 .frame(maxWidth: .infinity, minHeight: 64)
                 .padding(.horizontal, 24)
                 .padding(.top, 20)
-                .contentTransition(.opacity)
                 .animation(.easeInOut(duration: 0.2), value: flow.instruction)
 
             Spacer()
