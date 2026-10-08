@@ -18,6 +18,12 @@ struct ScanView: View {
                         .frame(width: 44, height: 44)
                 }
                 Spacer()
+                Button(action: tracker.flip) {
+                    Image(systemName: "arrow.triangle.2.circlepath.camera")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.black)
+                        .frame(width: 44, height: 44)
+                }
             }
             .padding(.horizontal, 8)
 

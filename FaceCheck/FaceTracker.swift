@@ -1,6 +1,7 @@
 import AVFoundation
 import UIKit
 import Vision
+import os
 
 /// How far the head must move from its resting pose to count as a turn.
 enum Threshold {
@@ -33,6 +34,11 @@ final class FaceTracker: NSObject, ObservableObject {
     private var mirrored = true
     private var smoothed: FacePose?
     private let alpha = 0.35
+    private let output = AVCaptureVideoDataOutput()
+    private let log = Logger(subsystem: "com.kobz.facecheck", category: "camera")
+    private var frames = 0
+
+    @Published private(set) var position: AVCaptureDevice.Position = .front
 
     func start() {
         #if targetEnvironment(simulator)
@@ -73,33 +79,56 @@ final class FaceTracker: NSObject, ObservableObject {
         }
     }
 
+    /// Switches between the front and back camera.
+    func flip() {
+        let next: AVCaptureDevice.Position = position == .front ? .back : .front
+        position = next
+        queue.async {
+            guard self.configured else { return }
+            self.session.beginConfiguration()
+            self.attachCamera(next)
+            self.session.commitConfiguration()
+            self.smoothed = nil
+        }
+    }
+
     private func configure() {
         session.beginConfiguration()
         defer { session.commitConfiguration() }
         if session.canSetSessionPreset(.hd1280x720) { session.sessionPreset = .hd1280x720 }
 
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
-              let input = try? AVCaptureDeviceInput(device: device),
-              session.canAddInput(input) else { return }
-        session.addInput(input)
-
-        let output = AVCaptureVideoDataOutput()
         output.alwaysDiscardsLateVideoFrames = true
         output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
         output.setSampleBufferDelegate(self, queue: queue)
-        guard session.canAddOutput(output) else { return }
+        guard session.canAddOutput(output) else { log.error("cannot add video output"); return }
         session.addOutput(output)
 
-        // Frames arrive upright and mirrored, the same way the preview shows them.
+        attachCamera(.front)
+        configured = true
+    }
+
+    /// Replaces the session's camera with the one at `pos`. Call inside begin/commitConfiguration.
+    private func attachCamera(_ pos: AVCaptureDevice.Position) {
+        session.inputs.forEach { session.removeInput($0) }
+        let found = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInTrueDepthCamera, .builtInWideAngleCamera], mediaType: .video, position: pos
+        ).devices
+        log.notice("cameras at \(pos.rawValue, privacy: .public): \(found.map { "\($0.localizedName) pos=\($0.position.rawValue)" }.joined(separator: ", "), privacy: .public)")
+        guard let device = found.first(where: { $0.position == pos }),
+              let input = try? AVCaptureDeviceInput(device: device),
+              session.canAddInput(input) else { log.error("no usable camera at \(pos.rawValue, privacy: .public)"); return }
+        session.addInput(input)
+        log.notice("using \(device.localizedName, privacy: .public) pos=\(device.position.rawValue, privacy: .public)")
+
+        // Frames arrive upright and, for the front camera, mirrored, the same way the preview shows them.
         if let c = output.connection(with: .video) {
             if c.isVideoMirroringSupported {
                 c.automaticallyAdjustsVideoMirroring = false
-                c.isVideoMirrored = true
+                c.isVideoMirrored = pos == .front
             }
             if c.isVideoOrientationSupported { c.videoOrientation = .portrait }
             mirrored = c.isVideoMirrored
         }
-        configured = true
     }
 
     /// Reads head direction from the face landmarks. Points are relative to the face box, origin bottom left.
@@ -169,6 +198,10 @@ final class FaceTracker: NSObject, ObservableObject {
 extension FaceTracker: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        frames += 1
+        if frames % 90 == 1 {
+            log.notice("frame \(self.frames, privacy: .public) \(CVPixelBufferGetWidth(pixels), privacy: .public)x\(CVPixelBufferGetHeight(pixels), privacy: .public) mirrored=\(connection.isVideoMirrored, privacy: .public)")
+        }
         let request = VNDetectFaceLandmarksRequest()
         try? VNImageRequestHandler(cvPixelBuffer: pixels, orientation: .up).perform([request])
 
