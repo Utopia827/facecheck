@@ -19,6 +19,8 @@ final class FlowModel: ObservableObject {
     private var samples: [FacePose] = []
     private var baseline: FacePose?
     private var holdSince: Date?
+    private var lastPoseAt: Date?
+    private let poseGrace = 0.35   // seconds of landmark dropout tolerated mid-turn
 
     var active: Direction? { phase == .turning ? steps[current] : nil }
 
@@ -43,6 +45,7 @@ final class FlowModel: ObservableObject {
         samples = []
         baseline = nil
         holdSince = nil
+        lastPoseAt = nil
     }
 
     func update(_ pose: FacePose?) {
@@ -86,11 +89,17 @@ final class FlowModel: ObservableObject {
     }
 
     private func track(_ pose: FacePose?) {
-        guard let p = pose, let b = baseline else {
-            progress = 0
-            holdSince = nil
+        guard let b = baseline else { progress = 0; holdSince = nil; return }
+        guard let p = pose else {
+            // Vision drops landmarks on near-profile frames; brief dropouts
+            // must not reset progress/hold (else a turn never completes).
+            if let last = lastPoseAt, Date().timeIntervalSince(last) > poseGrace {
+                progress = 0
+                holdSince = nil
+            }
             return
         }
+        lastPoseAt = Date()
         let d = steps[current]
         let amount: Double
         switch d {
@@ -120,5 +129,23 @@ final class FlowModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             if phase == .checking { phase = .finished }
         }
+    }
+
+    /// Testing: jump straight to a given direction step (tap a step circle).
+    func forceStep(_ d: Direction) {
+        guard let idx = steps.firstIndex(of: d) else { return }
+        current = idx
+        progress = 0
+        holdSince = nil
+        if phase == .calibrating {
+            baseline = baseline ?? FacePose(h: 0, v: 0.55, inCircle: true)
+        }
+        phase = .turning
+    }
+
+    /// Testing: tap the big arrow badge to skip the active step.
+    func skipActive() {
+        guard phase == .turning else { return }
+        complete(steps[current])
     }
 }

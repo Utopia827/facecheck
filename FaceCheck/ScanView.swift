@@ -66,13 +66,6 @@ struct ScanView: View {
                     Circle().fill(Color.white.opacity(0.55)).frame(width: circle, height: circle)
                     ProgressView().controlSize(.large).tint(.black)
                 }
-
-                if let d = flow.active, flow.faceOK {
-                    ArrowCue(direction: d)
-                        .offset(x: d.unit.dx * (circle / 2 - 46), y: d.unit.dy * (circle / 2 - 46))
-                        .id(d)
-                        .transition(.scale(scale: 0.2).combined(with: .opacity))
-                }
             }
             .frame(width: ring, height: ring)
             .animation(.spring(response: 0.35, dampingFraction: 0.6), value: flow.active)
@@ -81,49 +74,46 @@ struct ScanView: View {
 
             Spacer()
 
-            StepDots(steps: flow.steps, done: flow.done, active: flow.active)
+            StepDots(steps: flow.steps, done: flow.done, active: flow.active, onTap: flow.forceStep)
                 .padding(.bottom, 56)
         }
     }
 }
 
-/// The blue arrow, nudging toward where the head should go.
-private struct ArrowCue: View {
-    let direction: Direction
-    @State private var nudge = false
-
-    var body: some View {
-        Image(direction.arrowAsset)
-            .resizable()
-            .scaledToFit()
-            .frame(width: 58, height: 58)
-            .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
-            .offset(x: direction.unit.dx * (nudge ? 10 : -2), y: direction.unit.dy * (nudge ? 10 : -2))
-            .animation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true), value: nudge)
-            .onAppear { DispatchQueue.main.async { nudge = true } }
-    }
-}
+/// (Removed: the floating ArrowCue badge — the TickRing's active blue wedge
+///  with its white arrow glyph carries the direction cue now, and only one
+///  white-on-blue shape may be on screen for the on-device screen analyzer.)
 
 private struct StepDots: View {
     let steps: [Direction]
     let done: Set<Direction>
     let active: Direction?
+    let onTap: (Direction) -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 18) {
             ForEach(steps, id: \.self) { d in
                 let isDone = done.contains(d)
                 let isActive = d == active
-                ZStack {
-                    Circle()
-                        .fill(isDone ? Color.doneGreen : Color.white)
-                        .overlay(Circle().stroke(isDone ? Color.doneGreen : (isActive ? Color.igBlue : Color.tickGrey), lineWidth: 2))
-                    Image(systemName: isDone ? "checkmark" : d.symbol)
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(isDone ? Color.white : (isActive ? Color.igBlue : Color(white: 0.7)))
+                Button { onTap(d) } label: {
+                    ZStack {
+                        Circle()
+                            .fill(isDone ? Color.doneGreen
+                                        : isActive ? Color.igBlue
+                                        : Color.tickGrey)
+                        Image(systemName: isDone ? "checkmark" : d.symbol)
+                            .font(.system(size: 18, weight: .bold))
+                            // active: DARK arrow — a white glyph in a blue circle would
+                            // false-trigger the on-device arrow detector (that job
+                            // belongs to the ArrowCue badge alone)
+                            .foregroundStyle(isDone ? Color.white
+                                             : isActive ? Color(red: 0.05, green: 0.12, blue: 0.3)
+                                             : Color(white: 0.55))
+                    }
+                    .frame(width: 48, height: 48)
+                    .scaleEffect(isActive ? 1.18 : 1)
                 }
-                .frame(width: 36, height: 36)
-                .scaleEffect(isActive ? 1.12 : 1)
+                .buttonStyle(.plain)
                 .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isDone)
                 .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isActive)
             }

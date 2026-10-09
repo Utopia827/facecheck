@@ -1,7 +1,14 @@
 import SwiftUI
 
-/// Ring of tick marks around the camera circle.
-/// Calibration fills it blue clockwise from 12 o'clock; each direction then owns a sector that fills green.
+/// Ring around the camera circle.
+/// Idle: grey ticks. Calibrating: ticks fill green clockwise. Turning: the
+/// active direction owns a solid blue wedge with a white arrow glyph inside,
+/// and a green wedge sweeps with progress; done directions keep green wedges.
+///
+/// Color contract with the on-device screen analyzer: blue only ever marks the
+/// ACTIVE direction wedge (calibration uses green, the step dots use a dark
+/// glyph on blue with no white), and exactly one white-glyph-on-blue shape is
+/// on screen at a time.
 struct TickRing: View {
     let phase: FlowModel.Phase
     let calibration: Double
@@ -12,7 +19,7 @@ struct TickRing: View {
 
     private let count = 72
     private let tickLength: CGFloat = 16
-    private let halfSector = 44.0
+    private let halfSector = 40.0
 
     var body: some View {
         GeometryReader { geo in
@@ -20,10 +27,39 @@ struct TickRing: View {
             ZStack {
                 ForEach(0..<count, id: \.self) { i in
                     Capsule()
-                        .fill(color(i))
+                        .fill(tickColor(i))
                         .frame(width: 3.5, height: tickLength)
                         .offset(y: -(size / 2 - tickLength / 2))
                         .rotationEffect(.degrees(Double(i) / Double(count) * 360))
+                }
+
+                if phase == .turning || phase == .checking || phase == .finished {
+                    ForEach(Direction.allCases, id: \.self) { d in
+                        if done.contains(d) {
+                            wedgePath(size: size, centerAngle: d.sectorCenter)
+                                .fill(Color.doneGreen.opacity(0.85))
+                        } else if d == active && phase == .turning {
+                            wedgePath(size: size, centerAngle: d.sectorCenter)
+                                .fill(Color.igBlue)
+                            if progress > 0.01 {
+                                let sweepHalf = halfSector * progress
+                                wedgePath(size: size,
+                                          centerAngle: d.sectorCenter - halfSector + sweepHalf,
+                                          halfWidth: max(sweepHalf, 0.01))
+                                    .fill(Color.doneGreen)
+                            }
+                        }
+                    }
+                }
+
+                // White arrow glyph inside the active wedge — the single
+                // white-on-blue shape the screen analyzer tracks.
+                if phase == .turning, let d = active, faceOK {
+                    Image(systemName: d.symbol)
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.2), radius: 3)
+                        .offset(x: d.unit.dx * (size / 2 - 26), y: d.unit.dy * (size / 2 - 26))
                 }
             }
             .frame(width: size, height: size)
@@ -35,29 +71,34 @@ struct TickRing: View {
         .animation(.easeInOut(duration: 0.3), value: phase)
     }
 
-    private func color(_ i: Int) -> Color {
+    private func tickColor(_ i: Int) -> Color {
         let fraction = Double(i) / Double(count)
         switch phase {
         case .checking, .finished:
             return .doneGreen
         case .calibrating:
-            return faceOK && fraction < calibration ? .igBlue : .tickGrey
+            return faceOK && fraction < calibration ? .doneGreen : .tickGrey
         case .turning:
-            // Screen angle of this tick: 0 = 3 o'clock, clockwise.
-            let angle = (fraction * 360 - 90 + 360).truncatingRemainder(dividingBy: 360)
-            for d in Direction.allCases {
-                let dist = angularDistance(angle, d.sectorCenter)
-                guard dist <= halfSector else { continue }
-                if done.contains(d) { return .doneGreen }
-                if d == active, faceOK, dist / halfSector <= progress, progress > 0 { return .doneGreen }
-                return .tickGrey
-            }
             return .tickGrey
         }
     }
 
-    private func angularDistance(_ a: Double, _ b: Double) -> Double {
-        let d = abs(a - b).truncatingRemainder(dividingBy: 360)
-        return min(d, 360 - d)
+    /// Annular sector centered on `centerAngle` (degrees, 0 = 3 o'clock,
+    /// clockwise in screen coordinates).
+    private func wedgePath(size: CGFloat, centerAngle: Double,
+                           halfWidth: Double? = nil) -> Path {
+        let hw = halfWidth ?? halfSector
+        let center = CGPoint(x: size / 2, y: size / 2)
+        let outer = size / 2 - 4
+        let inner = size / 2 - tickLength * 2.4
+        var p = Path()
+        p.addArc(center: center, radius: outer,
+                 startAngle: .degrees(centerAngle - hw),
+                 endAngle: .degrees(centerAngle + hw), clockwise: false)
+        p.addArc(center: center, radius: inner,
+                 startAngle: .degrees(centerAngle + hw),
+                 endAngle: .degrees(centerAngle - hw), clockwise: true)
+        p.closeSubpath()
+        return p
     }
 }
