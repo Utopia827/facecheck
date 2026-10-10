@@ -38,15 +38,18 @@ final class FaceTracker: NSObject, ObservableObject {
     private let log = Logger(subsystem: "com.kobz.facecheck", category: "camera")
     private var frames = 0
 
-    // On-device fallback: when the camera feed yields no landmarks for a
-    // while (broken sandbox/IOSurface in dpkg installs), drive the flow with
-    // the same synthesized poses the simulator uses. The spoofed clip is
-    // already turning the on-screen head toward the active cue.
-    private var simFallback = false
+    // On-device fallback: when Vision yields no landmarks for a while, drive
+    // the pose from the SPOOF's state file — the tweak (injected into this
+    // process) records which direction clip is actually on screen. The flow
+    // then passes only when the fake feed really turned the requested way;
+    // with no spoof present there is no fallback and steps never complete.
+    private var stateFallback = false
     private var noFaceFrames = 0
     private var simH = 0.0
     private var simV = 0.55
-    private var simSince = Date()
+    private var spoofDir = 0          // 0 idle, 1 up, 2 right, 3 left
+    private var spoofFresh = false
+    private var lastStateRead = Date.distantPast
 
     @Published private(set) var position: AVCaptureDevice.Position = .front
 
@@ -170,6 +173,27 @@ final class FaceTracker: NSObject, ObservableObject {
         return CGPoint(x: s.x / CGFloat(pts.count), y: s.y / CGFloat(pts.count))
     }
 
+    /// Reads the spoof tweak's state file (<tmp>/scp_state.txt: "dir=N").
+    /// dir: 0 = idle/straight, 1 = up, 2 = right, 3 = left. Throttled to 5Hz.
+    private func readSpoofState() {
+        guard Date().timeIntervalSince(lastStateRead) > 0.2 else { return }
+        lastStateRead = Date()
+        let path = NSTemporaryDirectory() + "scp_state.txt"
+        guard let contents = try? String(contentsOfFile: path, encoding: .utf8),
+              let range = contents.range(of: "dir=") else {
+            spoofFresh = false
+            return
+        }
+        let num = contents[range.upperBound...].prefix { $0.isNumber }
+        spoofDir = Int(num) ?? 0
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+           let mtime = attrs[.modificationDate] as? Date {
+            spoofFresh = Date().timeIntervalSince(mtime) < 2.0
+        } else {
+            spoofFresh = false
+        }
+    }
+
     // MARK: Simulator
 
     #if targetEnvironment(simulator)
@@ -210,25 +234,28 @@ extension FaceTracker: AVCaptureVideoDataOutputSampleBufferDelegate {
         guard CMSampleBufferGetImageBuffer(sampleBuffer) != nil else { return }
         frames += 1
         if frames % 90 == 1 {
-            log.notice("frame \(self.frames, privacy: .public) \(CVPixelBufferGetWidth(CMSampleBufferGetImageBuffer(sampleBuffer)!), privacy: .public)x\(CVPixelBufferGetHeight(CMSampleBufferGetImageBuffer(sampleBuffer)!), privacy: .public) mirrored=\(connection?.isVideoMirrored ?? self.mirrored, privacy: .public) fallback=\(self.simFallback, privacy: .public)")
+            log.notice("frame \(self.frames, privacy: .public) \(CVPixelBufferGetWidth(CMSampleBufferGetImageBuffer(sampleBuffer)!), privacy: .public)x\(CVPixelBufferGetHeight(CMSampleBufferGetImageBuffer(sampleBuffer)!), privacy: .public) mirrored=\(connection?.isVideoMirrored ?? self.mirrored, privacy: .public) fallback=\(self.stateFallback, privacy: .public)")
         }
 
         var next: FacePose? = nil
-        if simFallback {
-            // Vision is unusable in this sandbox; drive the pose toward the
-            // active cue (same math as the simulator build).
+        if stateFallback {
+            // Vision is unusable in this sandbox; mirror the pose from the
+            // direction the spoof is ACTUALLY showing (state file). A wrong
+            // or absent direction ramps back to neutral and the step fails.
+            readSpoofState()
             var targetH = 0.0, targetV = 0.55
-            if let d = simTarget, Date().timeIntervalSince(simTargetSince) > 0.4 {
-                switch d {
-                case .left: targetH = -0.26
-                case .right: targetH = 0.26
-                case .up: targetV = 0.55 - 0.15
+            if spoofFresh {
+                switch spoofDir {
+                case 3: targetH = -0.26  // left
+                case 2: targetH = 0.26   // right
+                case 1: targetV = 0.55 - 0.15  // up
+                default: break
                 }
             }
-            // ~3s ramp per step: matches the head-turn clip length, so the
-            // screen cue, the fake camera feed, and the checkmark stay in sync.
-            simH += (targetH - simH) * 0.025
-            simV += (targetV - simV) * 0.025
+            // ~1s ramp: matches the head-turn clips, so screen cue, fake
+            // camera feed, and the checkmark stay in sync.
+            simH += (targetH - simH) * 0.04
+            simV += (targetV - simV) * 0.04
             next = FacePose(h: simH, v: simV, inCircle: true)
         } else {
             let pixels = CMSampleBufferGetImageBuffer(sampleBuffer)!
@@ -238,9 +265,9 @@ extension FaceTracker: AVCaptureVideoDataOutputSampleBufferDelegate {
             next = face.flatMap { Self.measure($0, mirrored: mirrored) }
             if next == nil {
                 noFaceFrames += 1
-                if noFaceFrames > 45 { // ~1.5s without a face -> pipeline unusable here
-                    simFallback = true
-                    log.notice("no landmarks for 45 frames -> simulated pose fallback")
+                if noFaceFrames > 45 { // ~1.5s without a face -> Vision unusable here
+                    stateFallback = true
+                    log.notice("no landmarks for 45 frames -> spoof-state fallback")
                 }
             } else {
                 noFaceFrames = 0
