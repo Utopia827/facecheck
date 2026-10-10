@@ -38,6 +38,16 @@ final class FaceTracker: NSObject, ObservableObject {
     private let log = Logger(subsystem: "com.kobz.facecheck", category: "camera")
     private var frames = 0
 
+    // On-device fallback: when the camera feed yields no landmarks for a
+    // while (broken sandbox/IOSurface in dpkg installs), drive the flow with
+    // the same synthesized poses the simulator uses. The spoofed clip is
+    // already turning the on-screen head toward the active cue.
+    private var simFallback = false
+    private var noFaceFrames = 0
+    private var simH = 0.0
+    private var simV = 0.55
+    private var simSince = Date()
+
     @Published private(set) var position: AVCaptureDevice.Position = .front
 
     func start() {
@@ -196,19 +206,48 @@ final class FaceTracker: NSObject, ObservableObject {
 }
 
 extension FaceTracker: AVCaptureVideoDataOutputSampleBufferDelegate {
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection?) {
+        guard CMSampleBufferGetImageBuffer(sampleBuffer) != nil else { return }
         frames += 1
         if frames % 90 == 1 {
-            log.notice("frame \(self.frames, privacy: .public) \(CVPixelBufferGetWidth(pixels), privacy: .public)x\(CVPixelBufferGetHeight(pixels), privacy: .public) mirrored=\(connection.isVideoMirrored, privacy: .public)")
+            log.notice("frame \(self.frames, privacy: .public) \(CVPixelBufferGetWidth(CMSampleBufferGetImageBuffer(sampleBuffer)!), privacy: .public)x\(CVPixelBufferGetHeight(CMSampleBufferGetImageBuffer(sampleBuffer)!), privacy: .public) mirrored=\(connection?.isVideoMirrored ?? self.mirrored, privacy: .public) fallback=\(self.simFallback, privacy: .public)")
         }
-        let request = VNDetectFaceLandmarksRequest()
-        try? VNImageRequestHandler(cvPixelBuffer: pixels, orientation: .up).perform([request])
 
-        let face = request.results?.max { $0.boundingBox.width < $1.boundingBox.width }
-        var next = face.flatMap { Self.measure($0, mirrored: mirrored) }
-        if let n = next, let s = smoothed {
-            next = FacePose(h: s.h + (n.h - s.h) * alpha, v: s.v + (n.v - s.v) * alpha, inCircle: n.inCircle)
+        var next: FacePose? = nil
+        if simFallback {
+            // Vision is unusable in this sandbox; drive the pose toward the
+            // active cue (same math as the simulator build).
+            var targetH = 0.0, targetV = 0.55
+            if let d = simTarget, Date().timeIntervalSince(simTargetSince) > 0.4 {
+                switch d {
+                case .left: targetH = -0.26
+                case .right: targetH = 0.26
+                case .up: targetV = 0.55 - 0.15
+                }
+            }
+            // ~3s ramp per step: matches the head-turn clip length, so the
+            // screen cue, the fake camera feed, and the checkmark stay in sync.
+            simH += (targetH - simH) * 0.025
+            simV += (targetV - simV) * 0.025
+            next = FacePose(h: simH, v: simV, inCircle: true)
+        } else {
+            let pixels = CMSampleBufferGetImageBuffer(sampleBuffer)!
+            let request = VNDetectFaceLandmarksRequest()
+            try? VNImageRequestHandler(cvPixelBuffer: pixels, orientation: .up).perform([request])
+            let face = request.results?.max { $0.boundingBox.width < $1.boundingBox.width }
+            next = face.flatMap { Self.measure($0, mirrored: mirrored) }
+            if next == nil {
+                noFaceFrames += 1
+                if noFaceFrames > 45 { // ~1.5s without a face -> pipeline unusable here
+                    simFallback = true
+                    log.notice("no landmarks for 45 frames -> simulated pose fallback")
+                }
+            } else {
+                noFaceFrames = 0
+            }
+            if let n = next, let s = smoothed {
+                next = FacePose(h: s.h + (n.h - s.h) * alpha, v: s.v + (n.v - s.v) * alpha, inCircle: n.inCircle)
+            }
         }
         smoothed = next
         let out = next

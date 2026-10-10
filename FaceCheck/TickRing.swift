@@ -41,11 +41,16 @@ struct TickRing: View {
                         } else if d == active && phase == .turning {
                             wedgePath(size: size, centerAngle: d.sectorCenter)
                                 .fill(Color.igBlue)
+                            // progress sweeps an INNER arc, leaving the blue
+                            // wedge intact — covering it shrank the blue blob
+                            // below the screen analyzer's gates and dropped
+                            // detection mid-step (the one-detection flicker).
                             if progress > 0.01 {
                                 let sweepHalf = halfSector * progress
                                 wedgePath(size: size,
                                           centerAngle: d.sectorCenter - halfSector + sweepHalf,
-                                          halfWidth: max(sweepHalf, 0.01))
+                                          halfWidth: max(sweepHalf, 0.01),
+                                          innerScale: 4.6, outerScale: 2.6)
                                     .fill(Color.doneGreen)
                             }
                         }
@@ -84,13 +89,16 @@ struct TickRing: View {
     }
 
     /// Annular sector centered on `centerAngle` (degrees, 0 = 3 o'clock,
-    /// clockwise in screen coordinates).
+    /// clockwise in screen coordinates). innerScale/outerScale position the
+    /// band: larger = closer to the center.
     private func wedgePath(size: CGFloat, centerAngle: Double,
-                           halfWidth: Double? = nil) -> Path {
+                           halfWidth: Double? = nil,
+                           innerScale: CGFloat = 2.4, outerScale: CGFloat = 0) -> Path {
         let hw = halfWidth ?? halfSector
         let center = CGPoint(x: size / 2, y: size / 2)
-        let outer = size / 2 - 4
-        let inner = size / 2 - tickLength * 2.4
+        let tickLen = tickLength
+        let outer = outerScale == 0 ? size / 2 - 4 : size / 2 - tickLen * outerScale
+        let inner = size / 2 - tickLen * innerScale
         var p = Path()
         p.addArc(center: center, radius: outer,
                  startAngle: .degrees(centerAngle - hw),

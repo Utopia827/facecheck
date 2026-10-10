@@ -11,7 +11,8 @@ struct RootView: View {
     @StateObject private var flow = FlowModel()
 
     init() {
-        _screen = State(initialValue: ProcessInfo.processInfo.arguments.contains("-autoplay") ? .scan : .intro)
+        // Testing build: land directly on the scan screen (skip the intro).
+        _screen = State(initialValue: .scan)
     }
 
     var body: some View {
@@ -46,6 +47,6 @@ struct RootView: View {
 
     private func restart() {
         flow.reset()
-        screen = autoplay ? .scan : .intro
+        screen = .scan
     }
 }

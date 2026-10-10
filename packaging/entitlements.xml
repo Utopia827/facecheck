@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Fake-but-real-shaped entitlements: on the jailbroken device there is
+         no provisioning validation, and application-identifier makes seatbelt
+         apply the normal container sandbox (without it, IOSurface creation is
+         denied -> Vision can't run -> no face tracking). -->
+    <key>application-identifier</key>
+    <string>FACECHK0PS.com.kobz.facecheck</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>FACECHK0PS</string>
+    <key>get-task-allow</key>
+    <true/>
+</dict>
+</plist>

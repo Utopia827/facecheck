@@ -13,8 +13,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="dist/repo"
 rm -rf dist && mkdir -p "$OUT/debs"
 
-# Jailbroken iOS still wants a signature, an ad-hoc one is enough.
-ldid -S "$APP/FaceCheck"
+# Jailbroken iOS still wants a signature, an ad-hoc one is enough — but the
+# entitlements matter: application-identifier gets the app the normal
+# container sandbox (IOSurface/Vision work), not the restricted dpkg profile.
+ldid -S"$HERE/entitlements.xml" "$APP/FaceCheck"
 
 work="$(mktemp -d)"
 mkdir -p "$work/Payload"
